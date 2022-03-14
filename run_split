@@ -1,0 +1,78 @@
+def run_manual_split(ar1):# This takes as an input "ar1" which is a dictionary of ar1 made by ColRadPy
+  
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import argon_data as ad
+    from colradpy_class import colradpy # This is from Curt Johnson's code ColRadPy
+    import nist_read as nr # This is also from Curt Johnson's code
+    
+    ar1_lines = nr.get_nist_lines('Ar',2) # Pull in all lines and information about singly ionized Ar
+    
+    # Below I define split and unsplit variables. I could definitely have this code be more efficient 
+    # if I didn't bother to define these variables, but it's more readable to me this way.
+    
+    # The following are split values relevant to argon
+    L = ar1.data['processed']['split']['L'] 
+    S = ar1.data['processed']['split']['S']
+    J = ar1.data['processed']['split']['j']
+    
+    config = np.array(ar1.data['processed']['split']['config']).tolist()
+    wave = ar1.data['processed']['split']['wave_air']
+    lvl = ar1.data['processed']['split']['pec_levels']
+    
+    # The following are unsplit values relevant to argon
+    unl = ar1.data['atomic']['L'] 
+    uns = ar1.data['atomic']['S'] 
+    unconfig = np.array(ar1.data['atomic']['config']).tolist()
+    a_val = ar1.data['rates']['a_val']
+    unlvl = ar1.data['processed']['pec_levels']
+    metastable_levels = ar1.data['atomic']['metas']
+    
+    
+    # Figure out which unsplit level corresponds to each wavelength
+    unsplit_place = np.empty(np.size(wave))
+    unsplit_lower_place = np.empty(np.size(wave))
+    statistical_weight = np.empty(np.size(wave))
+    new_PEC_val = np.zeros((((np.size(wave),np.size(metastable_levels),np.size(ar1.data['user']['temp_grid']), np.size(ar1.data['user']['dens_grid'])))))
+    
+    # This set of loops cycles through every wavelength and identifies the statistical weight of that wavelength. 
+    # Note that the statistical weight is normalized to the sum of all statistical weights. 
+    # It also identifies the unsplit J value that the wavelength comes form
+    for i in range(0,np.size(wave)):
+        for j in range(0,np.size(unconfig)):
+            if "1S2.2S2.2P6." + config[lvl[i][0]].upper()+"1" == unconfig[j] and L[lvl[i][0]] == unl[j] and S[lvl[i][0]] == uns[j]:
+                unsplit_place[i]=int(j)
+                if uns[int(unsplit_place[i])]% 2==0:
+                    weight = 2*np.arange(.5,(unl[int(unsplit_place[i])]+(uns[int(unsplit_place[i])]-1)/2)+1)+1
+                else:
+                    weight = 2*np.arange(0,(unl[int(unsplit_place[i])]+(uns[int(unsplit_place[i])]-1)/2)+1)+1
+                    
+                statistical_weight[i] = (2*J[lvl[i][0]]+1)/sum(weight)
+    
+    # This set of loops cycles through every wavelength and identifies the unsplit J value that the wavelength goes to. 
+    for i in range(0,np.size(wave)):
+        for j in range(0,np.size(unconfig)):
+            if config[lvl[i][1]].upper()+"1" == unconfig[j] and L[lvl[i][1]] == unl[j] and S[lvl[i][1]] == uns[j]:
+                unsplit_lower_place[i]=int(j)            
+                
+    
+    # Now find the dict for each wavelength in the lines file
+    nist_line_place = np.zeros(np.size(wave))
+    nist_a_coeff =np.zeros(np.size(wave))
+    for i in range(0,np.size(wave)):
+        for j in range(0,np.size(ar1_lines)):
+            if wave[i]>=((ar1_lines[j]['calc_wl_num']/10)-.1) and wave[i]<=((ar1_lines[j]['calc_wl_num']/10)+.1):
+                nist_line_place[i] = j
+                if type(ar1_lines[j]['A']) == str: # Checking to see if there's an Einstein A coefficient for this wavelength
+                    nist_a_coeff[i] = float(ar1_lines[j]['A'])
+                    for temperature in range(0,np.size(ar1.data['user']['temp_grid'])):
+                        for density in range(0,np.size(ar1.data['user']['dens_grid'])):
+                            for met in range(0,np.size(metastable_levels)):    
+                                pop = ar1.data['processed']['pops'][:,met,temperature,density] # Unsplit population
+                                
+                                # split PEC value = population * statistical weight * Einstein A coefficient
+                                
+                                new_PEC_val[i,met,temperature,density] = pop[int(unsplit_place[i])-np.size(metastable_levels)]*statistical_weight[i]*nist_a_coeff[i]
+
+    return new_PEC_val
+
